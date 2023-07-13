@@ -24,52 +24,76 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 public class MainActivity extends AppCompatActivity {
-    String tunnelHost;
-    int tunnelPort;
+    String proxyHost, host;
+    int proxyPort, port;
+    SSLSocket socket;
+    SSLSocketFactory factory;
     @Override
     protected void onCreate(Bundle savedInstanceState){
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        EditText ipAddressInput = (EditText)findViewById(R.id.ipaddress);
-        EditText portInput = (EditText)findViewById(R.id.port);
-        Button connectButton = (Button)findViewById(R.id.connect);
+        EditText ipAddressInput = findViewById(R.id.ipaddress);
+        EditText portInput = findViewById(R.id.port);
+        Button connectButton = findViewById(R.id.connect);
         connectButton.setOnClickListener((event)->{
-            String host = ipAddressInput.getText().toString();
-            int port = Integer.parseInt(portInput.getText().toString());
-            try {
-                SSLSocketClientWithTunneling(host,port);
-            } catch (IOException e) {
-                e.printStackTrace();
+            host = ipAddressInput.getText().toString();
+            port = Integer.parseInt(portInput.getText().toString());
+            try{
+                proxyHost = System.getProperty("https.proxyHost");
+                proxyPort = Integer.parseInt(System.getProperty("https.proxyPort"));
+                System.out.println("Proxy Detected: "+proxyHost+" : "+proxyPort);
+                SSLSocketClientWithTunneling(host,port,true);
+            }catch(Exception e){
+                System.out.println("No Proxy Detected");
+            }finally {
+                // code for regular SSL Socket without proxy
+                try {
+                    SSLSocketClientWithTunneling(host,port,false);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
         });
     }
 
-    private void SSLSocketClientWithTunneling(String host, int port) throws IOException {
+    private void SSLSocketClientWithTunneling(String host, int port, boolean tunnel) throws IOException {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                SSLSocketFactory factory = (SSLSocketFactory)SSLSocketFactory.getDefault();
-                tunnelHost = System.getProperty("https.proxyHost");
-                tunnelPort = Integer.getInteger("https.proxyPort").intValue();
-                Socket tunnel;
-                SSLSocket socket;
-                try {
-                    tunnel = new Socket(tunnelHost, tunnelPort);
-                    doTunnelHandshake(tunnel, host, port);
-                    socket = (SSLSocket)factory.createSocket(tunnel, host, port, true);
-                    socket.addHandshakeCompletedListener(
-                            new HandshakeCompletedListener() {
-                                public void handshakeCompleted(HandshakeCompletedEvent event) {
-                                    System.out.println("Handshake finished!");
-                                    System.out.println(
-                                            "\t CipherSuite:" + event.getCipherSuite());
-                                    System.out.println(
-                                            "\t SessionId " + event.getSession());
-                                    System.out.println(
-                                            "\t PeerHost " + event.getSession().getPeerHost());
+                factory  = (SSLSocketFactory)SSLSocketFactory.getDefault();
+                Socket proxySocket = null;
+                if(tunnel){
+                    try {
+                        proxySocket = new Socket(proxyHost, proxyPort);
+                        System.out.println("Proxy Socket Created");
+                        doTunnelHandshake(proxySocket, host, port);
+                        System.out.println("Proxy Socket Connected:"+ host);
+                        socket = (SSLSocket)factory.createSocket(proxySocket, host, port, false);
+                        socket.addHandshakeCompletedListener(
+                                new HandshakeCompletedListener() {
+                                    public void handshakeCompleted(HandshakeCompletedEvent event) {
+                                        System.out.println("Handshake finished!");
+                                        System.out.println(
+                                                "\t CipherSuite:" + event.getCipherSuite());
+                                        System.out.println(
+                                                "\t SessionId " + event.getSession());
+                                        System.out.println(
+                                                "\t PeerHost " + event.getSession().getPeerHost());
+                                    }
                                 }
-                            }
-                    );
+                        );
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }else{
+                    try {
+                        socket = (SSLSocket)factory.createSocket(host, port);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                try {
                     /*
                      * send http request
                      *
@@ -124,8 +148,8 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    private void doTunnelHandshake(Socket tunnel, String host, int port) throws IOException {
-        OutputStream out = tunnel.getOutputStream();
+    private void doTunnelHandshake(Socket proxySocket, String host, int port) throws IOException {
+        OutputStream out = proxySocket.getOutputStream();
         String msg = "CONNECT " + host + ":" + port + " HTTP/1.1\n\n";
         byte b[];
         try {
@@ -141,7 +165,7 @@ public class MainActivity extends AppCompatActivity {
         int             newlinesSeen = 0;
         boolean         headerDone = false;     /* Done on first newline */
 
-        InputStream in = tunnel.getInputStream();
+        InputStream in = proxySocket.getInputStream();
         boolean         error = false;
 
         while (newlinesSeen < 2) {
@@ -166,10 +190,10 @@ public class MainActivity extends AppCompatActivity {
             replyStr = new String(reply, 0, replyLen);
         }
 
-        /* We asked for HTTP/1.0, so we should get that back */
+        /* We asked for HTTP/1.1, so we should get that back */
         if (!replyStr.startsWith("HTTP/1.1 200")) {
             throw new IOException("Unable to tunnel through "
-                    + tunnelHost + ":" + tunnelPort
+                    + proxyHost + ":" + proxyPort
                     + ".  Proxy returns \"" + replyStr + "\"");
         }
     }
