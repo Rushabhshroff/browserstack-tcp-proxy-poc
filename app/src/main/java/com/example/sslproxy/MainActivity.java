@@ -3,6 +3,7 @@ package com.example.sslproxy;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.os.Bundle;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 
@@ -17,6 +18,8 @@ import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 import javax.net.ssl.HandshakeCompletedEvent;
 import javax.net.ssl.HandshakeCompletedListener;
@@ -35,28 +38,29 @@ public class MainActivity extends AppCompatActivity {
         EditText ipAddressInput = findViewById(R.id.ipaddress);
         EditText portInput = findViewById(R.id.port);
         Button connectButton = findViewById(R.id.connect);
-        connectButton.setOnClickListener((event)->{
-            host = ipAddressInput.getText().toString();
-            port = Integer.parseInt(portInput.getText().toString());
-            try{
-                proxyHost = System.getProperty("https.proxyHost");
-                proxyPort = Integer.parseInt(System.getProperty("https.proxyPort"));
-                System.out.println("Proxy Detected: "+proxyHost+" : "+proxyPort);
-                SSLSocketClientWithTunneling(host,port,true);
-            }catch(Exception e){
-                System.out.println("No Proxy Detected");
-            }finally {
-                // code for regular SSL Socket without proxy
-                try {
-                    SSLSocketClientWithTunneling(host,port,false);
-                } catch (IOException e) {
-                    e.printStackTrace();
+        connectButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                host = ipAddressInput.getText().toString();
+                port = Integer.parseInt(portInput.getText().toString());
+                try{
+                    proxyHost = System.getProperty("https.proxyHost");
+                    proxyPort = Integer.parseInt(System.getProperty("https.proxyPort"));
+                    System.out.println("Proxy Detected: "+proxyHost+" : "+proxyPort);
+                    SSLSocketClientWithTunneling(host,port,true);
+                }catch(Exception e){
+                    System.out.println("No Proxy Detected");
+                    try {
+                        SSLSocketClientWithTunneling(host,port,false);
+                    } catch (IOException ioException) {
+                        ioException.printStackTrace();
+                    }
                 }
             }
         });
     }
 
-    private void SSLSocketClientWithTunneling(String host, int port, boolean tunnel) throws IOException {
+    private void SSLSocketClientWithTunneling(String host, int port, boolean tunnel) throws IOException  {
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -69,19 +73,6 @@ public class MainActivity extends AppCompatActivity {
                         doTunnelHandshake(proxySocket, host, port);
                         System.out.println("Proxy Socket Connected:"+ host);
                         socket = (SSLSocket)factory.createSocket(proxySocket, host, port, false);
-                        socket.addHandshakeCompletedListener(
-                                new HandshakeCompletedListener() {
-                                    public void handshakeCompleted(HandshakeCompletedEvent event) {
-                                        System.out.println("Handshake finished!");
-                                        System.out.println(
-                                                "\t CipherSuite:" + event.getCipherSuite());
-                                        System.out.println(
-                                                "\t SessionId " + event.getSession());
-                                        System.out.println(
-                                                "\t PeerHost " + event.getSession().getPeerHost());
-                                    }
-                                }
-                        );
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
@@ -94,6 +85,21 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 try {
+                    socket.addHandshakeCompletedListener(
+                            new HandshakeCompletedListener() {
+                                public void handshakeCompleted(HandshakeCompletedEvent event) {
+                                    System.out.println("Handshake finished!");
+                                    System.out.println(
+                                            "\t PeerHost " + event.getSession().getPeerHost());
+                                    System.out.println(
+                                            "\t CipherSuite:" + event.getCipherSuite());
+                                    System.out.println(
+                                            "\t SessionId " + event.getSession());
+                                    System.out.println(
+                                            "\t Protocol Version " + event.getSession().getProtocol());
+                                }
+                            }
+                    );
                     /*
                      * send http request
                      *
@@ -197,4 +203,5 @@ public class MainActivity extends AppCompatActivity {
                     + ".  Proxy returns \"" + replyStr + "\"");
         }
     }
+
 }
